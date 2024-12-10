@@ -1,6 +1,6 @@
 # Core dependencies
 jira==3.5.1
-pandas==2.0.1
+# pandas==2.0.1
 openpyxl==3.1.2  # Required for Excel export
 
 # Optional: For environment variable management
