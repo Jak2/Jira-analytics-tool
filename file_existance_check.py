@@ -1,3 +1,8 @@
+from office365.runtime.auth.user_credential import UserCredential
+from office365.sharepoint.client_context import ClientContext
+from office365.sharepoint.files.file import File
+
+
 def file_exists_in_sharepoint(ctx, file_path):
     """
     Check if a file exists in the SharePoint path.
