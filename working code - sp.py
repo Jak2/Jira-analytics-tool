@@ -1,3 +1,4 @@
+# pip install O365 pandas requests
 import requests
 import pandas as pd
 from O365 import Account, FileSystemTokenBackend
