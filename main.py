@@ -1,185 +1,230 @@
 import os
-from jira import JIRA
-from typing import List, Dict, Any, Optional
+import logging
+from datetime import datetime
 import pandas as pd
+import requests
+from office365.runtime.auth.user_credential import UserCredential
+from office365.sharepoint.client_context import ClientContext
+from office365.sharepoint.files.file import File
 
-class JiraAnalyticsTool:
-    def __init__(self, jira_server=None, username=None, api_token=None, 
-                 client_id=None, client_secret=None, access_token=None):
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('jira_sharepoint_integration.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class SharePointManager:
+    """Handles SharePoint operations"""
+    
+    def __init__(self, sharepoint_url, sharepoint_site, username, password):
         """
-        Initialize Jira connection with multiple authentication methods
-        
-        Authentication Methods:
-        1. Basic Authentication (username + API token)
-        2. OAuth 2.0 (client_id, client_secret, access_token)
+        Initialize SharePoint connection
         
         Args:
-            jira_server (str): Jira instance URL
-            username (str): Jira username for basic auth
-            api_token (str): API token for basic auth
-            client_id (str): OAuth 2.0 client ID
-            client_secret (str): OAuth 2.0 client secret
-            access_token (str): OAuth 2.0 access token
+            sharepoint_url (str): SharePoint site URL
+            sharepoint_site (str): SharePoint site name
+            username (str): SharePoint username
+            password (str): SharePoint password
         """
-        # Jira connection parameters
-        self.jira_server = jira_server or os.getenv('JIRA_SERVER', 'https://your-jira-instance.atlassian.net')
-        self.username = username or os.getenv('JIRA_USERNAME')
-        self.api_token = api_token or os.getenv('JIRA_API_TOKEN')
+        self.ctx = ClientContext(sharepoint_url).with_credentials(
+            UserCredential(username, password)
+        )
+        self.site = sharepoint_site
         
-        # OAuth parameters
-        self.client_id = client_id or os.getenv('JIRA_CLIENT_ID')
-        self.client_secret = client_secret or os.getenv('JIRA_CLIENT_SECRET')
-        self.access_token = access_token or os.getenv('JIRA_ACCESS_TOKEN')
-        
-        # Initialize Jira client
-        self.jira_client = self._connect_to_jira()
-
-    def _connect_to_jira(self) -> JIRA:
+    def read_file(self, file_path):
         """
-        Establish connection to Jira instance with multiple auth methods
+        Read file from SharePoint
         
+        Args:
+            file_path (str): Path to file in SharePoint
+            
         Returns:
-            JIRA: Authenticated Jira client
+            pd.DataFrame: DataFrame containing file contents
         """
         try:
-            # Basic Authentication
-            if self.username and self.api_token:
-                jira = JIRA(
-                    server=self.jira_server,
-                    basic_auth=(self.username, self.api_token)
-                )
-                print("Successfully connected to Jira using Basic Authentication!")
-                return jira
+            logger.info(f"Reading file from SharePoint: {file_path}")
+            response = File.open_binary(self.ctx, file_path)
             
-            # OAuth 2.0 Authentication
-            elif self.client_id and self.client_secret and self.access_token:
-                oauth_dict = {
-                    'access_token': self.access_token,
-                    'access_token_secret': '',
-                    'consumer_key': self.client_id,
-                    'key_cert': self.client_secret
-                }
-                jira = JIRA(
-                    server=self.jira_server,
-                    oauth=oauth_dict
-                )
-                print("Successfully connected to Jira using OAuth 2.0!")
-                return jira
+            with open('temp_file.csv', 'wb') as local_file:
+                local_file.write(response.content)
             
-            else:
-                raise ValueError("No valid authentication method provided")
-        
+            df = pd.read_csv('temp_file.csv')
+            os.remove('temp_file.csv')
+            
+            return df
+            
         except Exception as e:
-            print(f"Error connecting to Jira: {e}")
+            logger.error(f"Error reading file from SharePoint: {str(e)}")
             raise
 
-    def fetch_issues(self, jql_query: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+    def write_file(self, df, file_path):
         """
-        Fetch Jira issues directly using a JQL query
+        Write DataFrame to SharePoint
         
         Args:
-            jql_query (str): Jira Query Language (JQL) query
-            max_results (Optional[int]): Maximum number of issues to fetch
-        
-        Returns:
-            List[Dict[str, Any]]: List of issue dictionaries
+            df (pd.DataFrame): DataFrame to write
+            file_path (str): Path where to save file in SharePoint
         """
-        # Determine max results
-        if max_results is None or max_results <= 0:
-            # Fetch all issues if no limit specified
-            max_results = None
-        
         try:
-            issues = self.jira_client.search_issues(
-                jql_query, 
-                maxResults=max_results,
-                fields=[
-                    'summary', 'status', 'priority', 'issuetype', 'created', 
-                    'updated', 'resolved', 'assignee', 'reporter', 
-                    'project', 'fixVersion', 'components', 'labels', 
-                    'environment', 'resolution', 'timeSpent'
-                ]
+            logger.info(f"Writing file to SharePoint: {file_path}")
+            
+            # Save DataFrame to temporary file
+            temp_file = 'temp_output.csv'
+            df.to_csv(temp_file, index=False)
+            
+            # Upload to SharePoint
+            with open(temp_file, 'rb') as content_file:
+                file_content = content_file.read()
+            
+            File.save_binary(self.ctx, file_path, file_content)
+            
+            # Clean up temporary file
+            os.remove(temp_file)
+            
+            logger.info("File successfully written to SharePoint")
+            
+        except Exception as e:
+            logger.error(f"Error writing file to SharePoint: {str(e)}")
+            raise
+
+class JiraManager:
+    """Handles JIRA operations"""
+    
+    def __init__(self, jira_url, email, api_token):
+        """
+        Initialize JIRA connection
+        
+        Args:
+            jira_url (str): JIRA base URL
+            email (str): JIRA email
+            api_token (str): JIRA API token
+        """
+        self.jira_url = jira_url
+        self.auth = (email, api_token)
+        self.headers = {'Accept': 'application/json'}
+
+    def fetch_jira_data(self, jql_query):
+        """
+        Fetch data from JIRA using JQL query
+        
+        Args:
+            jql_query (str): JQL query to execute
+            
+        Returns:
+            list: List of JIRA issues
+        """
+        try:
+            url = f'{self.jira_url}/rest/api/2/search'
+            params = {'startAt': 0, 'maxResults': 100, 'jql': jql_query}
+            
+            response = requests.get(
+                url, 
+                headers=self.headers, 
+                auth=self.auth, 
+                params=params, 
+                verify=False
             )
-            return [self._format_issue(issue) for issue in issues]
+            response.raise_for_status()
+            
+            return response.json().get('issues', [])
+            
         except Exception as e:
-            print(f"Error fetching issues: {e}")
-            return []
+            logger.error(f"Error fetching JIRA data: {str(e)}")
+            raise
 
-    def _format_issue(self, issue) -> Dict[str, Any]:
-        """
-        Format Jira issue for easier consumption
-        
-        Args:
-            issue: Jira issue object
-        
-        Returns:
-            Dict[str, Any]: Formatted issue dictionary
-        """
-        return {
-            'issueKey': issue.key,
-            'summary': issue.fields.summary,
-            'status': str(issue.fields.status),
-            'priority': str(issue.fields.priority),
-            'issuetype': str(issue.fields.issuetype),
-            'created': str(issue.fields.created),
-            'updated': str(issue.fields.updated),
-            'resolved': str(getattr(issue.fields, 'resolutiondate', None)),
-            'assignee': str(issue.fields.assignee) if issue.fields.assignee else None,
-            'reporter': str(issue.fields.reporter),
-            'project': str(issue.fields.project),
-            'fixVersion': ', '.join([str(v) for v in issue.fields.fixVersions]) if issue.fields.fixVersions else None,
-            'component': ', '.join([str(c) for c in issue.fields.components]) if issue.fields.components else None,
-            'labels': issue.fields.labels,
-            'environment': getattr(issue.fields, 'environment', None),
-            'resolution': str(issue.fields.resolution) if issue.fields.resolution else None,
-            'timeSpent': getattr(issue.fields, 'timeSpent', None)
-        }
-
-    def export_to_excel(self, issues: List[Dict[str, Any]], filename: str = 'jira_issues.xlsx'):
-        """
-        Export issues to Excel
-        
-        Args:
-            issues (List[Dict[str, Any]]): List of issue dictionaries
-            filename (str): Output Excel filename
-        """
-        try:
-            df = pd.DataFrame(issues)
-            df.to_excel(filename, index=False)
-            print(f"Issues exported to {filename}")
-        except Exception as e:
-            print(f"Error exporting to Excel: {e}")
+def extract_issue_details(issue, business, project, metrics):
+    """Extract relevant fields from JIRA issue"""
+    fields = issue.get('fields', {})
+    labels_to_include = ['label1', 'label2']  # Configure as needed
+    filtered_labels = [
+        label for label in fields.get('labels', []) 
+        if label in labels_to_include
+    ]
+    
+    return {
+        'Issue ID': issue.get('id'),
+        'Issue Key': issue.get('key'),
+        'Status': fields.get('status', {}).get('name', 'Not Found'),
+        'Issue Type': fields.get('issuetype', {}).get('name', 'Not Found'),
+        'Project Name': project,
+        'Story Points': fields.get('customfield_10003', 0),
+        'Objective Type': fields.get('customfield_16506', 'Not Found'),
+        'Planned Business Value': fields.get('customfield_16502', 'Not Found'),
+        'Completed Business Value': fields.get('customfield_16503', 'Not Found'),
+        'Program Increment': fields.get('customfield_18800', 'Not Found'),
+        'Business': business,
+        'Metrics': metrics,
+        'Labels': filtered_labels
+    }
 
 def main():
-    # Create Jira Analytics Tool instance
-    jira_tool = JiraAnalyticsTool()
+    # Configuration
+    config = {
+        'sharepoint': {
+            'url': 'your_sharepoint_url',
+            'site': 'your_site_name',
+            'username': 'your_username',
+            'password': 'your_password',
+            'input_file': '/sites/your_site/Shared Documents/input.csv',
+            'output_file': '/sites/your_site/Shared Documents/output.csv'
+        },
+        'jira': {
+            'url': 'https://eaton-corp.atlassian.net',
+            'email': 'sandhyaranirathlavath@eaton.com',
+            'api_token': 'your_api_token_here'
+        }
+    }
     
-    # Prompt for JQL query
-    jql_query = input("Enter your JQL query: ").strip()
-    
-    # Prompt for number of issues
     try:
-        max_issues = input("Enter number of issues to fetch (press Enter to fetch all): ").strip()
-        max_issues = int(max_issues) if max_issues else None
-    except ValueError:
-        print("Invalid input. Fetching all issues.")
-        max_issues = None
-    
-    # Fetch issues
-    issues = jira_tool.fetch_issues(jql_query, max_issues)
-    
-    # Print issues
-    if issues:
-        print(f"\nFetched {len(issues)} issues:")
-        for issue in issues:
-            print(f"Issue Key: {issue['issueKey']} - Summary: {issue['summary']}")
+        # Initialize managers
+        sharepoint = SharePointManager(
+            config['sharepoint']['url'],
+            config['sharepoint']['site'],
+            config['sharepoint']['username'],
+            config['sharepoint']['password']
+        )
         
-        # Export to Excel option
-        export_choice = input("\nDo you want to export issues to Excel? (y/n): ").strip().lower()
-        if export_choice == 'y':
-            jira_tool.export_to_excel(issues)
-    else:
-        print("No issues found matching the JQL query.")
+        jira = JiraManager(
+            config['jira']['url'],
+            config['jira']['email'],
+            config['jira']['api_token']
+        )
+        
+        # Read input file from SharePoint
+        logger.info("Starting data processing")
+        df = sharepoint.read_file(config['sharepoint']['input_file'])
+        
+        # Process each row
+        results = []
+        for index, row in df.iterrows():
+            logger.info(f"Processing row {index + 1}/{len(df)}")
+            
+            issues = jira.fetch_jira_data(row['jql_query'])
+            detail_data = [
+                extract_issue_details(
+                    issue, 
+                    row['business'], 
+                    row['project'], 
+                    row['metrics']
+                ) for issue in issues
+            ]
+            results.extend(detail_data)
+        
+        # Create output DataFrame
+        output_df = pd.DataFrame(results)
+        
+        # Write to SharePoint
+        sharepoint.write_file(output_df, config['sharepoint']['output_file'])
+        logger.info("Processing completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
