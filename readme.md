@@ -1,139 +1,200 @@
-# Jira Analytics Tool
+# SharePoint-JIRA Integration Tool Documentation
 
-## Project Structure
-```
-jira-analytics-tool/
-│
-├── src/
-│   ├── __init__.py
-│   └── jira_analytics.py
-│
-├── scripts/
-│   └── run_jira_analytics.py
-│
-├── requirements.txt
-├── README.md
-├── .env.example
-└── .gitignore
-```
+## Table of Contents
+1. [Overview](#overview)
+2. [Prerequisites](#prerequisites)
+3. [Installation](#installation)
+4. [Configuration](#configuration)
+5. [Code Structure](#code-structure)
+6. [Usage Guide](#usage-guide)
+7. [Troubleshooting](#troubleshooting)
+
+## Overview
+
+This tool automates the process of:
+1. Reading data from a SharePoint CSV file
+2. Querying JIRA based on the input data
+3. Processing JIRA responses
+4. Saving results back to SharePoint
 
 ## Prerequisites
 
-### Installation
+- Python 3.8 or higher
+- SharePoint Online account with appropriate permissions
+- JIRA account with API access
+- Network access to both SharePoint and JIRA servers
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/jira-analytics-tool.git
-cd jira-analytics-tool
-```
+## Installation
 
+1. Clone the repository or download the script
 2. Create a virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Configuration
+
+### Required Configuration Parameters
+
+1. SharePoint Configuration:
+   ```python
+   'sharepoint': {
+       'url': 'https://your-company.sharepoint.com',
+       'site': 'your-site-name',
+       'username': 'your.email@company.com',
+       'password': 'your-password',
+       'input_file': '/sites/your_site/Shared Documents/input.csv',
+       'output_file': '/sites/your_site/Shared Documents/output.csv'
+   }
+   ```
+
+2. JIRA Configuration:
+   ```python
+   'jira': {
+       'url': 'https://your-company.atlassian.net',
+       'email': 'your.email@company.com',
+       'api_token': 'your-jira-api-token'
+   }
+   ```
+
+### Input File Format
+The input CSV file should contain the following columns:
+- jql_query: JIRA query string
+- business: Business unit name
+- project: Project name
+- metrics: Metrics information
+
+## Code Structure
+
+### Main Components
+
+1. **SharePointManager Class**
+   - Handles all SharePoint operations
+   - Methods:
+     - `read_file()`: Reads CSV from SharePoint
+     - `write_file()`: Writes DataFrame to SharePoint
+
+2. **JiraManager Class**
+   - Manages JIRA API interactions
+   - Methods:
+     - `fetch_jira_data()`: Executes JQL queries
+     - Handles authentication and response processing
+
+3. **Helper Functions**
+   - `extract_issue_details()`: Processes JIRA issue data
+   - Logging utilities for operation tracking
+
+### Data Flow
+
+```
+SharePoint Input File
+       ↓
+Read CSV Data
+       ↓
+Process Each Row
+       ↓
+Query JIRA API
+       ↓
+Extract Issue Details
+       ↓
+Compile Results
+       ↓
+Write to SharePoint
 ```
 
-3. Install required dependencies:
-```bash
-pip install -r requirements.txt
+## Usage Guide
+
+### Basic Usage
+
+1. Update configuration in the script:
+   ```python
+   config = {
+       'sharepoint': {
+           # Your SharePoint configuration
+       },
+       'jira': {
+           # Your JIRA configuration
+       }
+   }
+   ```
+
+2. Run the script:
+   ```bash
+   python script_name.py
+   ```
+
+### Logging
+
+- Logs are written to 'jira_sharepoint_integration.log'
+- Console output shows real-time progress
+- Log levels: INFO, ERROR, DEBUG
+
+### Example Input CSV
+
+```csv
+jql_query,business,project,metrics
+"project = PROJ AND issuetype = Bug",Business Unit 1,Project A,Metric 1
+"project = PROJ AND issuetype = Task",Business Unit 2,Project B,Metric 2
 ```
 
-### Authentication Setup
+### Example Output CSV
 
-#### Method 1: Environment Variables (Recommended)
-1. Copy the `.env.example` file to `.env`
-```bash
-cp .env.example .env
-```
-
-2. Edit the `.env` file with your Jira credentials:
-```
-# Basic Authentication
-JIRA_SERVER=https://your-jira-instance.atlassian.net
-JIRA_USERNAME=your_username
-JIRA_API_TOKEN=your_api_token
-
-# Optional OAuth 2.0 Credentials
-JIRA_CLIENT_ID=your_client_id
-JIRA_CLIENT_SECRET=your_client_secret
-JIRA_ACCESS_TOKEN=your_access_token
-```
-
-#### Method 2: Direct Instantiation
-You can also pass credentials directly when creating the JiraAnalyticsTool instance:
-```python
-jira_tool = JiraAnalyticsTool(
-    jira_server='https://your-jira-instance.atlassian.net',
-    username='your_username', 
-    api_token='your_api_token'
-)
-```
-
-## Usage
-
-### Running the Script
-```bash
-python scripts/run_jira_analytics.py
-```
-
-### Example JQL Queries
-1. Fetch all open issues:
-```
-status = Open
-```
-
-2. Fetch issues assigned to a specific user:
-```
-assignee = "john.doe"
-```
-
-3. Fetch issues created in the last week:
-```
-created >= -1w
-```
-
-4. Fetch issues by project and priority:
-```
-project = "PROJECT_KEY" AND priority = High
-```
-
-## Configuration Options
-
-### Fetching Issues
-- You can specify the maximum number of issues to fetch
-- Leave blank to fetch all matching issues
-
-### Export Options
-- Export fetched issues to Excel 
-- Choose filename and location during runtime
+The output file will contain columns including:
+- Issue ID
+- Issue Key
+- Status
+- Issue Type
+- Project Name
+- Story Points
+- Business
+- Metrics
+- Labels
 
 ## Troubleshooting
 
-### Common Issues
-1. **Authentication Failure**
-   - Double-check your Jira server URL
-   - Verify username and API token
-   - Ensure proper network access
+### Common Issues and Solutions
 
-2. **No Issues Found**
-   - Verify your JQL query syntax
-   - Check issue visibility and permissions
+1. **SharePoint Connection Failed**
+   - Check credentials
+   - Verify SharePoint URL format
+   - Ensure network access
 
-### Obtaining Jira API Token
-1. Log in to Atlassian Account
-2. Go to API Tokens section
-3. Create a new API token
-4. Copy and use in `.env` file
+2. **JIRA API Errors**
+   - Verify API token
+   - Check JQL query syntax
+   - Confirm API access permissions
 
-## Contributing
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
+3. **File Access Issues**
+   - Verify file paths
+   - Check SharePoint permissions
+   - Ensure file format is correct
 
-## License
-[Specify your license, e.g., MIT]
+### Error Messages
 
-## Contact
-[Your contact information or support email]
+- "Error reading file from SharePoint": Check file path and permissions
+- "Error fetching JIRA data": Verify JIRA configuration and query
+- "Error in main execution": Check overall configuration and logs
+
+### Best Practices
+
+1. **Performance Optimization**
+   - Process data in smaller batches for large datasets
+   - Use appropriate JQL queries to limit results
+   - Monitor memory usage for large operations
+
+2. **Security**
+   - Store credentials securely (use environment variables)
+   - Regular API token rotation
+   - Minimum required permissions
+
+3. **Maintenance**
+   - Regular log file cleanup
+   - Monitor SharePoint storage usage
+   - Update dependencies regularly
+
+For additional support or questions, please contact your system administrator or refer to the internal documentation.
